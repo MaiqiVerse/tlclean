@@ -105,12 +105,14 @@ def answer_logits(model, ids):
     model's forward takes it (HF Llama / Qwen), the full call otherwise
     (models/selfExtend). A batch of 8 patched copies of a 3.7k-token prompt
     materialised 8 x 3.7k x 152k float32 logits, 17 GiB, and took the fp32
-    Qwen cells down in the exact CIE (jobs 845633 / 845635)."""
+    Qwen cells down in the exact CIE (jobs 845633 / 845635). No KV cache
+    either: a forward that is read once has nothing to cache, and the cache
+    of eight 3.7k-token copies was 8.7 GiB on Qwen3-8B fp32 (job 845849)."""
     import inspect
     import torch
     if "logits_to_keep" in inspect.signature(model.forward).parameters:
-        return model(ids, logits_to_keep=1).logits[:, -1, :].to(torch.float64)
-    return model(ids).logits[:, -1, :].to(torch.float64)
+        return model(ids, logits_to_keep=1, use_cache=False).logits[:, -1, :].to(torch.float64)
+    return model(ids, use_cache=False).logits[:, -1, :].to(torch.float64)
 
 
 def patched_logits(model, ids, layer, heads, values, head_dim):

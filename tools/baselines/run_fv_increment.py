@@ -238,18 +238,34 @@ def exact_cie_for(model, ids, gold_tok, abar, heads, d_h, batch, torch, metric=N
             return gold_full_prob(lg, gold_tok)
     with torch.no_grad():
         base = float(metric(answer_logits(model, ids)[0]))
+    # `batch` may be a one-element list: the batch the caller keeps across
+    # prompts. On a CUDA OOM the batch is halved and the same heads retried,
+    # and the list carries the smaller batch forward (Qwen3-8B fp32 with
+    # eight 3.7k-token copies: job 845849). Every head is still scored.
+    holder = batch if isinstance(batch, list) else [int(batch)]
     out = {}
     by_layer = {}
     for l, h in heads:
         by_layer.setdefault(int(l), []).append(int(h))
     for l, hs in by_layer.items():
-        for lo in range(0, len(hs), batch):
-            part = hs[lo:lo + batch]
+        lo = 0
+        while lo < len(hs):
+            part = hs[lo:lo + holder[0]]
             vals = [torch.as_tensor(abar[l, h]) for h in part]
-            lg = patched_logits(model, ids.repeat(len(part), 1), l, part, vals, d_h)
+            try:
+                lg = patched_logits(model, ids.repeat(len(part), 1), l, part, vals, d_h)
+            except torch.OutOfMemoryError:
+                if holder[0] <= 1:
+                    raise
+                torch.cuda.empty_cache()
+                holder[0] = max(1, holder[0] // 2)
+                print(f"    exact CIE: out of memory at a batch of {len(part)} patched copies; "
+                      f"continuing with {holder[0]}", flush=True)
+                continue
             p = metric(lg).cpu().numpy()
             for h, pv in zip(part, p):
                 out[(l, h)] = float(pv - base)
+            lo += len(part)
     return out
 
 
@@ -435,8 +451,9 @@ def main(argv=None) -> int:
             pool = [(l, h) for l in range(n_l) for h in range(n_h) if (l, h) not in set(cand)]
             audit = [pool[i] for i in rng.choice(len(pool), size=min(args.atp_audit, len(pool)), replace=False)]
         exact = {lh: 0.0 for lh in list(cand) + audit}
+        cie_batch = [int(args.cie_batch)]        # halved in place on an OOM, kept across prompts
         for ids, gold in cie_prompts:
-            got = exact_cie_for(model, ids, gold, abar, list(exact), d_h, args.cie_batch, torch)
+            got = exact_cie_for(model, ids, gold, abar, list(exact), d_h, cie_batch, torch)
             for lh, v in got.items():
                 exact[lh] += v
         exact = {lh: v / float(len(cie_prompts)) for lh, v in exact.items()}
@@ -451,7 +468,7 @@ def main(argv=None) -> int:
         print(f"  seed {s}: top-{n_heads} {heads}")
         print(f"  seed {s}: |v_FV| = {np.linalg.norm(v):.4f}")
         st = {"n_extraction_prompts": len(pairs), "n_correct": n_ok,
-              "atp_screen": screen, "spearman_atp_exact_on_candidates": rho_cand,
+              "atp_screen": screen, "cie_batch": int(cie_batch[0]), "spearman_atp_exact_on_candidates": rho_cand,
               "exact_cie_top": {f"{l},{h}": exact[(l, h)] for l, h in heads},
               "atp_top": {f"{l},{h}": float(atp[l, h]) for l, h in cand[:n_heads]}}
         if audit:
