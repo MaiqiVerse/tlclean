@@ -78,7 +78,11 @@
 #   TEST=1 sbatch ... bash script/method_cell.sh L31c36 test   # the test read, after validation
 #   Smoke on a cached checkpoint (this host, no slurm):
 #   MTAG=smoke MODEL=Qwen/Qwen2-7B-Instruct VPC=1 NQ=12 LIMIT=6 LEVELS="0:5 2:5" bash script/method_cell.sh smoke
-set -e
+# -E (errtrace): every tool runs inside the `run` function, and without it
+# bash skips the ERR trap below for a failure inside a function -- the cell
+# exited at the traceback with no [abort] line and no ledger abort event
+# (the Monk-1 smoke of 2026-09-13; the same silence on every earlier abort).
+set -eE
 # The eager probes materialise float32 [heads, L, L] score matrices; on long-text tasks the
 # caching allocator's fragmentation (8-14 GiB reserved but unallocated at the OOMs of jobs
 # 844655 / 844658 / 844677) is what tipped a 40 GB card. Expandable segments remove it.
