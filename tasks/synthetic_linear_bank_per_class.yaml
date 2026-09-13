@@ -1,0 +1,2 @@
+task: synthetic_linear_bank_per_class
+class: !function synthetic_linear_bank_task.SyntheticLinearBank

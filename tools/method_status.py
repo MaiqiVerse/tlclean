@@ -144,10 +144,13 @@ def task_faults(task):
     if task not in DOC_FIELDS:
         return [f"unknown task {task!r}; known: {sorted(DOC_FIELDS)}"]
     if task in ALL_ELIGIBLE:
+        from tools.prereg_task import BANK_FORM
         return [f"{task}: a generated task carries its demonstrations inside "
                 "each query (a per-prompt hidden function), so there is no "
                 "shared demonstration bank for the constructions to read; the "
-                "rediscovery chain covers it, the method line does not"]
+                "rediscovery chain covers it, the method line does not. Its "
+                f"shared-bank form is {BANK_FORM[task]}: one fixed concept, a "
+                "train bank and a test pool (tasks/shared_bank_task.py)"]
     if not task.endswith("_per_class"):
         return [f"{task}: the constructions read K demonstrations PER CLASS; "
                 f"use {task}_per_class"]

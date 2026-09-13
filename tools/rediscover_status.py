@@ -66,6 +66,12 @@ TASK_TAGS = {
     "monk_per_class_r3": "_monkr3",
     "synthetic_linear_per_class": "_synl",
     "synthetic_mlp_per_class": "_synm",
+    # the shared-bank forms (tasks/shared_bank_task.py); method line only
+    "monk_bank_r1_per_class": "_monkb1",
+    "monk_bank_r2_per_class": "_monkb2",
+    "monk_bank_r3_per_class": "_monkb3",
+    "synthetic_linear_bank_per_class": "_synlb",
+    "synthetic_mlp_bank_per_class": "_synmb",
 }
 
 # The later phases' drivers, as rediscover_cell.sh runs them.

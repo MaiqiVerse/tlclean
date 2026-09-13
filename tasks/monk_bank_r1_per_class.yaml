@@ -1,0 +1,2 @@
+task: monk_bank_r1_per_class
+class: !function monk_bank_task.MonkBankR1

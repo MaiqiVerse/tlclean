@@ -55,11 +55,15 @@
 # for an unregistered checkpoint), SelfExtend included -- the receivers' mask
 # enters the attention module the same way. Any k-per-class task with a shared
 # demonstration bank and a train split: trec_fine, banking77, clinc150,
-# yelp_full, dbpedia14, yahoo_answers (their _per_class variants). The
-# generated tasks (synthetic_*, monk_*) carry their demonstrations inside each
-# query and are refused (tools/method_status.py --task-check); the rediscovery
-# chain covers those. A level whose prompts overrun the model's window is
-# skipped and the reason recorded, never silently truncated.
+# yelp_full, dbpedia14, yahoo_answers (their _per_class variants), and the
+# shared-bank forms of the generated tasks -- monk_bank_r{1,2,3}_per_class,
+# synthetic_linear_bank_per_class, synthetic_mlp_bank_per_class: one fixed
+# hidden concept per task, a train bank and a disjoint test pool
+# (tasks/shared_bank_task.py). The per-prompt generated tasks
+# (synthetic_*_per_class, monk_per_class*) carry their demonstrations inside
+# each query and are refused (tools/method_status.py --task-check); the
+# rediscovery chain covers those. A level whose prompts overrun the model's
+# window is skipped and the reason recorded, never silently truncated.
 #
 # Usage (server):
 #   sbatch script/lsu1.sh bash script/method_cell.sh L31c36

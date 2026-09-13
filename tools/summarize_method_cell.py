@@ -163,7 +163,11 @@ MODEL_NAMES = {"meta-llama/Llama-3.1-8B": "Llama-3.1-8B",
                "Qwen/Qwen3-14B-Base": "Qwen3-14B"}
 TASK_NAMES = {"trec_fine_per_class": "TREC-fine", "banking77_per_class": "banking77",
               "clinc150_per_class": "clinc150", "dbpedia14_per_class": "dbpedia14",
-              "yahoo_answers_per_class": "yahoo", "yelp_full_per_class": "yelp"}
+              "yahoo_answers_per_class": "yahoo", "yelp_full_per_class": "yelp",
+              "monk_bank_r1_per_class": "Monk-1", "monk_bank_r2_per_class": "Monk-2",
+              "monk_bank_r3_per_class": "Monk-3",
+              "synthetic_linear_bank_per_class": "synthetic linear",
+              "synthetic_mlp_bank_per_class": "synthetic MLP"}
 
 
 def display_model(model, method=None):

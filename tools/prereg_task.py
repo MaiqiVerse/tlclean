@@ -67,16 +67,41 @@ DOC_FIELDS = {
     "synthetic_linear_per_class": ("features", "label"),
     "synthetic_mlp": ("features", "label"),
     "synthetic_mlp_per_class": ("features", "label"),
+    # The shared-bank forms (tasks/shared_bank_task.py): `text` is the
+    # row's identity (the integer features, space-joined) and the renderer
+    # reads `features`. Ordinary train / test tasks: the count rule applies.
+    "monk_bank_r1_per_class": ("text", "label"),
+    "monk_bank_r2_per_class": ("text", "label"),
+    "monk_bank_r3_per_class": ("text", "label"),
+    "synthetic_linear_bank_per_class": ("text", "label"),
+    "synthetic_mlp_bank_per_class": ("text", "label"),
 }
 
-# The generated tasks keep their query label under another key than their
-# train rows do, and their classes are fixed by construction -- every class
-# is present in both splits with a known count -- so the count rule is not
-# applied to them: every class is eligible.
-TEST_LABEL_FIELDS = {t: "query_label_idx" for t in DOC_FIELDS
-                     if t.startswith(("monk", "synthetic_"))}
-ALL_ELIGIBLE = {t for t in DOC_FIELDS
-                if t.startswith(("monk", "synthetic_"))}
+# The PER-PROMPT generated tasks keep their query label under another key
+# than their train rows do, and their classes are fixed by construction --
+# every class is present in both splits with a known count -- so the count
+# rule is not applied to them: every class is eligible. Named one by one:
+# the shared-bank forms share the name prefixes and are ordinary train /
+# test tasks, read exactly like banking77.
+PER_PROMPT_TASKS = frozenset({
+    "monk", "monk_per_class", "monk_per_class_r1", "monk_per_class_r2",
+    "monk_per_class_r3", "synthetic_linear", "synthetic_linear_per_class",
+    "synthetic_mlp", "synthetic_mlp_per_class"})
+TEST_LABEL_FIELDS = {t: "query_label_idx" for t in PER_PROMPT_TASKS}
+ALL_ELIGIBLE = set(PER_PROMPT_TASKS)
+# The shared-bank form of each per-prompt task (tasks/shared_bank_task.py):
+# what tools/method_status --task-check points a refused task at.
+BANK_FORM = {
+    "monk": "monk_bank_r1_per_class",
+    "monk_per_class": "monk_bank_r1_per_class",
+    "monk_per_class_r1": "monk_bank_r1_per_class",
+    "monk_per_class_r2": "monk_bank_r2_per_class",
+    "monk_per_class_r3": "monk_bank_r3_per_class",
+    "synthetic_linear": "synthetic_linear_bank_per_class",
+    "synthetic_linear_per_class": "synthetic_linear_bank_per_class",
+    "synthetic_mlp": "synthetic_mlp_bank_per_class",
+    "synthetic_mlp_per_class": "synthetic_mlp_bank_per_class",
+}
 
 
 def test_label_field(task_name: str) -> str:
