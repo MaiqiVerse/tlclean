@@ -75,7 +75,7 @@ from tools.tl_heads import TLHeadSet
 
 @contextmanager
 def _patch_tl_attention_capture(model, layers_needed, answer_position, key_pad=None,
-                                row_mode=None):
+                                row_mode=None, capture_device=None):
     """Monkey-patch self_attn.forward at the given layers so the answer
     position's attention row alpha[N, :] is captured, per layer, as a CPU
     fp32 Tensor[num_heads, n_tokens]; yields the dict layer_idx -> row.
@@ -108,6 +108,7 @@ def _patch_tl_attention_capture(model, layers_needed, answer_position, key_pad=N
     """
     captured: dict[int, Tensor] = {}
     originals: dict[int, callable] = {}
+    cap_dev = capture_device or "cpu"     # where the rows land; the host was the only choice until 2026-09-13
     impl = getattr(model.config, "_attn_implementation", "eager") or "eager"
     mode = row_mode or ("weights" if impl == "eager" else "recompute")
     if mode not in ("weights", "recompute"):
@@ -123,10 +124,10 @@ def _patch_tl_attention_capture(model, layers_needed, answer_position, key_pad=N
             # Output is (attn_output, attn_weights, [past_key_value]).
             if isinstance(out, tuple) and len(out) >= 2 and out[1] is not None:
                 attn_weights = out[1]
-                # [B=1, num_heads, q_len, kv_len]; slice answer-row, ship to CPU
+                # [B=1, num_heads, q_len, kv_len]; slice answer-row, ship to cap_dev
                 captured[_lidx] = (
                     attn_weights[0, :, answer_position, :]
-                    .detach().to(torch.float32).cpu()
+                    .detach().to(cap_dev, torch.float32)
                 )
                 # Replace with None to drop the GPU reference at layer exit.
                 return (out[0], None) + tuple(out[2:])
@@ -179,7 +180,7 @@ def _patch_tl_attention_capture(model, layers_needed, answer_position, key_pad=N
                 s[:, answer_position + 1:] = float("-inf")
                 if key_pad is not None:
                     s[:, key_pad.to(s.device)] = float("-inf")
-                captured[_lidx] = torch.softmax(s, dim=-1).detach().cpu()
+                captured[_lidx] = torch.softmax(s, dim=-1).detach().to(cap_dev)
             return _orig(*args, **kwargs)
         return patched
 
@@ -261,6 +262,7 @@ def _run_capture_forward(
     capture_resid: bool = False,
     allow_kv_group: bool = False,
     row_mode: Optional[str] = None,
+    capture_device: Optional[str] = None,
 ) -> tuple[dict[int, Tensor], dict[int, Tensor], dict]:
     """Shared core for diagnostic_forward and extract_per_head_logit_contributions.
 
@@ -270,8 +272,17 @@ def _run_capture_forward(
       - v_proj forward hooks at TL layers to capture V at all positions
 
     Returns:
-        alpha_cache: dict layer -> Tensor[num_heads, n_tokens]   (fp32 CPU)
-        v_cache:     dict layer -> Tensor[num_heads, n_tokens, d_head]  (CPU, orig dtype)
+        alpha_cache: dict layer -> Tensor[num_heads, n_tokens]   (fp32, on capture_device)
+        v_cache:     dict layer -> Tensor[num_heads, n_tokens, d_head]  (orig dtype, on capture_device)
+        capture_device: None = the host (every registered number was read with the
+                     rows and value caches copied to the CPU). The hoisted fast path
+                     of extract_per_head_logit_contributions passes its compute
+                     device instead: the same tensors stay where the contraction
+                     runs, no round trip. At 32 layers x [32, 3.8k, 128] bf16 the
+                     round trip was ~1 GB per forward, and the carrier discovery
+                     (six forwards per query) ran at 13 CPU cores with the GPU near
+                     idle (2026-09-13, RESULTS 63.27). Values are identical: a copy
+                     and a bf16 -> fp32 cast are exact on either device.
         dims:        {'n_tokens', 'answer_position', 'd_head', 'd_model',
                       'n_attn_heads', 'n_kv_heads'}
     """
@@ -298,6 +309,7 @@ def _run_capture_forward(
 
     v_cache: dict[int, Tensor] = {}
     v_raw_cache: dict[int, Tensor] = {}
+    cap_dev = capture_device or "cpu"
 
     def make_v_hook(layer_idx: int):
         def hook(module, _input, output):
@@ -336,12 +348,12 @@ def _run_capture_forward(
                 # untouched, so the whole patch path executes and changes
                 # nothing. Gate 2.
                 out = raw.unsqueeze(0)
-            v_raw_cache[layer_idx] = raw.detach().cpu()      # donors come from here
+            v_raw_cache[layer_idx] = raw.detach().to(cap_dev)   # donors come from here
             v = raw.view(n_tokens, n_kv_heads, d_head)
             v = v.transpose(0, 1).contiguous()               # [n_kv_heads, n_tok, d_head]
             if n_kv_heads != n_attn_heads:
                 v = v.repeat_interleave(n_attn_heads // n_kv_heads, dim=0)
-            v_cache[layer_idx] = v.detach().cpu()
+            v_cache[layer_idx] = v.detach().to(cap_dev)
             if patch_v and layer_idx in patch_v:
                 # returning a value replaces the module's output downstream
                 return out if is_tensor else (out,) + tuple(output[1:])
@@ -398,7 +410,8 @@ def _run_capture_forward(
     try:
         key_pad = (attention_mask[0] == 0) if bool((attention_mask == 0).any()) else None
         with _patch_tl_attention_capture(model, layers_needed, answer_position,
-                                         key_pad=key_pad, row_mode=row_mode) as alpha_cache:
+                                         key_pad=key_pad, row_mode=row_mode,
+                                         capture_device=cap_dev) as alpha_cache:
             with torch.no_grad():
                 out = model(
                     input_ids=input_ids,
@@ -651,6 +664,9 @@ def extract_per_head_logit_contributions(
     alpha_cache, v_cache, dims = _run_capture_forward(
         model, input_ids, tl_heads, answer_position, attention_mask, inject=inject,
         row_mode=row_mode,
+        # the fast path contracts on compute_device: capture there and skip
+        # the host round trip (the reference path below keeps the host)
+        capture_device=(compute_device if head_proj is not None else None),
     )
     d_head = dims["d_head"]
 
