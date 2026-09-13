@@ -394,7 +394,7 @@ def main() -> int:  # noqa: C901
     # demanded p_proc >= p_naive on every draw and went red at 11/12 -- with a
     # finite permutation count the ordering can flip on an individual draw even
     # when the systematic relationship is exactly as described. Demanding an
-    # inequality a correct implementation cannot always satisfy is working rules 
+    # inequality a correct implementation cannot always satisfy is working rules
     # 11b, which this project has now paid for three times.
     check("on pure noise the naive sign-flip is SYSTEMATICALLY more optimistic",
           pp.mean() > pn.mean() and int((pp >= pn).sum()) >= 18,

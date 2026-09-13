@@ -54,3 +54,38 @@ mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
 The second command of each pair starts only if the first finished cleanly.
 Each pair takes about a day on one card; the I2CL calibration is the slow
 step (about half an hour per seed per level).
+
+## The generated tasks (no download)
+
+The three synthetic datasets ship as shared-bank tasks -- one fixed hidden
+concept per task, a training bank the demonstrations are drawn from and a
+disjoint test pool: `monk_bank_r1_per_class`, `monk_bank_r2_per_class`,
+`monk_bank_r3_per_class` (the UCI Monk files under `tasks/monk/`),
+`synthetic_linear_bank_per_class` and `synthetic_mlp_bank_per_class`
+(generated in memory from `function_seed=0`). Nothing is downloaded. The
+same two commands with the task name; the default levels (`0:5 2:5 5:10`,
+discovery at K = 5) fit all five, and the prompts are short, so a pair
+takes hours rather than a day:
+
+```
+mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
+  TASK=synthetic_mlp_bank_per_class bash script/method_cell.sh L31c36 \
+  && TASK=synthetic_mlp_bank_per_class TEST=1 bash script/method_cell.sh L31c36 "ceiling test"
+' > logs/synmlp_run.out 2>&1 &
+```
+
+`TASK=synthetic_linear_bank_per_class` runs the linear one the same way.
+The Monk tasks have two classes, so the default 4 validation queries per
+class give a seed only 8; `VPC=12` gives 24 (the bank keeps 50 per class
+for the demonstrations, enough for K = 10):
+
+```
+mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
+  TASK=monk_bank_r1_per_class VPC=12 bash script/method_cell.sh L31c36 \
+  && TASK=monk_bank_r1_per_class VPC=12 TEST=1 bash script/method_cell.sh L31c36 "ceiling test"
+' > logs/monk1_run.out 2>&1 &
+```
+
+`TASK=monk_bank_r2_per_class` / `monk_bank_r3_per_class` for the other
+two rules. The cells land in `results/method/L31c36_synmb`,
+`L31c36_synlb`, `L31c36_monkb1/2/3`.
