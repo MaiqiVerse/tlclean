@@ -13,6 +13,8 @@ huggingface-cli login                # meta-llama/* checkpoints are gated
 export HF_HOME=/path/with/space      # model weights and the datasets cache
 ```
 
+No flash-attention, triton or cuDNN setup is needed.
+
 The remaining packages, exactly as pinned in `requirements.txt`
 (`pip install -r requirements.txt` installs them):
 
