@@ -22,8 +22,5 @@ scikit-learn==1.8.0
 datasets==4.7.0
 lm_eval==0.4.11
 #
-# --- figures (figs/code) ---
-matplotlib==3.10.9
-#
 # --- optional: models/selfExtend flash-attention support only; the pipeline runs eager / sdpa ---
 # triton (3.1.0 on the cluster, 3.3.1 on the dev host), flash_attn (2.8.3 / 2.8.2, built wheels)
