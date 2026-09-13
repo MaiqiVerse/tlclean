@@ -43,7 +43,7 @@ the query):
   every arm      its validation read: n_v cached forwards (the receivers)
 
 MEASURED: the runners print their own seconds ("(741s)", "in 77s",
-"5 forwards (45s)", "epoch 3/100: ... (6s)"); --log collects them per
+"5 forwards (45s)", "calibrated 128 scalars in 250s"); --log collects them per
 level and seed. --ledger turns the driver's ledger.jsonl (one `start`
 event per step) into step durations. Wall-clock depends on the card,
 the dtype and the prompt length; the counts do not.
@@ -101,10 +101,12 @@ SECS = [
     ("TV", "theta", re.compile(r"(\d+) forwards \((\d+)s\)")),
     ("ICV", "pairs", re.compile(r"\((\d+)s\); \|\|mean Delta\|\|")),
     ("I2CL", "cv", re.compile(r"context vectors from (\d+) extra demonstrations \((\d+)s\)")),
+    ("I2CL", "calib", re.compile(r"calibrated (\d+) scalars in (\d+)s")),
 ]
-EPOCH_RE = re.compile(r"^\s+epoch (\d+)/(\d+): .*\((\d+)s\)$")
+# the epoch lines ("epoch 10/100: ... (28s)") carry the CUMULATIVE seconds and are
+# printed every ten epochs; the runner's own total is the "calibrated ... in Ns" line
 NAMES = {"FV": "FV", "TASK VECTORS": "TV", "IN-CONTEXT VECTORS": "ICV", "I2CL": "I2CL"}
-REQUIRED = {"FV": ("mean", "AtP", "CIE"), "TV": ("theta",), "ICV": ("pairs",), "I2CL": ("cv", "epochs")}
+REQUIRED = {"FV": ("mean", "AtP", "CIE"), "TV": ("theta",), "ICV": ("pairs",), "I2CL": ("cv", "calib")}
 
 
 def parse_log(path):
@@ -132,11 +134,6 @@ def parse_log(path):
                 if mm:
                     out[cur].setdefault(seed, {})[part] = int(mm.groups()[-1])
             continue
-        m = EPOCH_RE.match(raw)
-        if m and cur[0] == "I2CL" and seed is not None:
-            d = out[cur].setdefault(seed, {})
-            d["epochs"] = d.get("epochs", 0) + int(m.group(3))
-            d["n_epochs"] = int(m.group(2))
     return out
 
 
@@ -146,13 +143,12 @@ def print_log(parsed):
     totals = {}
     for (meth, kb, kf), seeds in sorted(parsed.items(), key=lambda kv: (kv[0][1], kv[0][2], kv[0][0])):
         for s, parts in sorted(seeds.items()):
-            shown = {k: v for k, v in parts.items() if k != "n_epochs"}
+            shown = dict(parts)
             tot = sum(shown.values())
             done = all(k in parts for k in REQUIRED[meth])
             if done:
                 totals.setdefault((meth, kb, kf), []).append(tot)
-            extra = f" ({parts['n_epochs']} epochs)" if "n_epochs" in parts else ""
-            print(f"  K={kb}->{kf:<7} {meth:<6} {s:>4}  {shown}{extra} -> {tot} s"
+            print(f"  K={kb}->{kf:<7} {meth:<6} {s:>4}  {shown} -> {tot} s"
                   + ("" if done else "  (INCOMPLETE: the run stopped here; not in the mean)"))
     print("\n  per level, mean over seeds:")
     for (meth, kb, kf), ts in sorted(totals.items(), key=lambda kv: (kv[0][1], kv[0][2], kv[0][0])):
@@ -160,13 +156,32 @@ def print_log(parsed):
 
 
 def print_ledger(path):
+    """Step durations per job: a step lasts from its `start` to the next
+    step's `start` in the SAME job (or to the job's `cell done`); a job's
+    last step without a `done` is open (the job aborted or was cut). A step
+    of a few seconds was skipped (its artifacts existed)."""
     evs = [json.loads(l) for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
-    starts = [(e["step"], datetime.strptime(e["utc"], "%Y-%m-%dT%H:%M:%SZ")) for e in evs if e.get("event") == "start"]
-    print(f"\nledger {path}: step durations (start to the next step's start)")
-    for (s, t0), (_s1, t1) in zip(starts, starts[1:]):
-        print(f"  {s:<10} {(t1 - t0).total_seconds():8.0f} s")
-    if starts:
-        print(f"  {starts[-1][0]:<10}   (last step, open)")
+    by_job = {}
+    for e in evs:
+        by_job.setdefault(str(e.get("job", "")), []).append(e)
+    print(f"\nledger {path}: step durations per job (seconds; a few seconds = skipped)")
+    for job, es in by_job.items():
+        cell = es[0].get("cell", "")
+        marks = [(e["step"], e["event"], datetime.strptime(e["utc"], "%Y-%m-%dT%H:%M:%SZ"))
+                 for e in es if e.get("event") in ("start", "done") and e["step"] != "cell"]
+        done = [datetime.strptime(e["utc"], "%Y-%m-%dT%H:%M:%SZ") for e in es
+                if e.get("event") == "done" and e["step"] == "cell"]
+        starts = [(s, t) for s, ev, t in marks if ev == "start"]
+        if not starts:
+            continue
+        print(f"  job {job or '(none)'}  {cell}  {es[0]['utc']}")
+        for (s, t0), (_s1, t1) in zip(starts, starts[1:]):
+            print(f"    {s:<10} {(t1 - t0).total_seconds():8.0f}")
+        s, t0 = starts[-1]
+        if done:
+            print(f"    {s:<10} {(done[-1] - t0).total_seconds():8.0f}   (to the job's done)")
+        else:
+            print(f"    {s:<10}     open   (no done event: aborted, cut, or still running)")
 
 
 def main(argv=None) -> int:
