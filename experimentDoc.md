@@ -59,13 +59,13 @@ step (about half an hour per seed per level).
 
 The three synthetic datasets ship as shared-bank tasks -- one fixed hidden
 concept per task, a training bank the demonstrations are drawn from and a
-disjoint test pool: `monk_bank_r1_per_class`, `monk_bank_r2_per_class`,
-`monk_bank_r3_per_class` (the UCI Monk files under `tasks/monk/`),
-`synthetic_linear_bank_per_class` and `synthetic_mlp_bank_per_class`
-(generated in memory from `function_seed=0`). Nothing is downloaded. The
-same two commands with the task name; the default levels (`0:5 2:5 5:10`,
-discovery at K = 5) fit all five, and the prompts are short, so a pair
-takes hours rather than a day:
+disjoint test pool: `synthetic_mlp_bank_per_class` and
+`synthetic_linear_bank_per_class` (generated in memory from
+`function_seed=0`) and `monk_bank_r1_per_class` (Monk-1, the UCI files
+under `tasks/monk/`). Nothing is downloaded. The same two commands with
+the task name; the default levels (`0:5 2:5 5:10`, discovery at K = 5)
+fit all three, and the prompts are short, so a pair takes hours rather
+than a day:
 
 ```
 mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
@@ -83,9 +83,9 @@ mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
 ' > logs/synlin_run.out 2>&1 &
 ```
 
-The Monk tasks have two classes, so the default 4 validation queries per
-class give a seed only 8; `VPC=12` gives 24 (the bank keeps 50 per class
-for the demonstrations, enough for K = 10). Rule 1:
+Monk-1 has two classes, so the default 4 validation queries per class
+give a seed only 8; `VPC=12` gives 24 (the bank keeps 50 per class for
+the demonstrations, enough for K = 10):
 
 ```
 mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
@@ -94,21 +94,5 @@ mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
 ' > logs/monk1_run.out 2>&1 &
 ```
 
-Rules 2 and 3:
-
-```
-mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
-  TASK=monk_bank_r2_per_class VPC=12 bash script/method_cell.sh L31c36 \
-  && TASK=monk_bank_r2_per_class VPC=12 TEST=1 bash script/method_cell.sh L31c36 "ceiling test"
-' > logs/monk2_run.out 2>&1 &
-```
-
-```
-mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
-  TASK=monk_bank_r3_per_class VPC=12 bash script/method_cell.sh L31c36 \
-  && TASK=monk_bank_r3_per_class VPC=12 TEST=1 bash script/method_cell.sh L31c36 "ceiling test"
-' > logs/monk3_run.out 2>&1 &
-```
-
-The cells land in `results/method/L31c36_synmb`, `L31c36_synlb`,
-`L31c36_monkb1`, `L31c36_monkb2`, `L31c36_monkb3`.
+The cells land in `results/method/L31c36_synmb`, `L31c36_synlb` and
+`L31c36_monkb1`.
