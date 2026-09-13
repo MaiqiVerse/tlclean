@@ -74,10 +74,18 @@ mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
 ' > logs/synmlp_run.out 2>&1 &
 ```
 
-`TASK=synthetic_linear_bank_per_class` runs the linear one the same way.
+The linear one:
+
+```
+mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
+  TASK=synthetic_linear_bank_per_class bash script/method_cell.sh L31c36 \
+  && TASK=synthetic_linear_bank_per_class TEST=1 bash script/method_cell.sh L31c36 "ceiling test"
+' > logs/synlin_run.out 2>&1 &
+```
+
 The Monk tasks have two classes, so the default 4 validation queries per
 class give a seed only 8; `VPC=12` gives 24 (the bank keeps 50 per class
-for the demonstrations, enough for K = 10):
+for the demonstrations, enough for K = 10). Rule 1:
 
 ```
 mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
@@ -86,6 +94,21 @@ mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
 ' > logs/monk1_run.out 2>&1 &
 ```
 
-`TASK=monk_bank_r2_per_class` / `monk_bank_r3_per_class` for the other
-two rules. The cells land in `results/method/L31c36_synmb`,
-`L31c36_synlb`, `L31c36_monkb1/2/3`.
+Rules 2 and 3:
+
+```
+mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
+  TASK=monk_bank_r2_per_class VPC=12 bash script/method_cell.sh L31c36 \
+  && TASK=monk_bank_r2_per_class VPC=12 TEST=1 bash script/method_cell.sh L31c36 "ceiling test"
+' > logs/monk2_run.out 2>&1 &
+```
+
+```
+mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
+  TASK=monk_bank_r3_per_class VPC=12 bash script/method_cell.sh L31c36 \
+  && TASK=monk_bank_r3_per_class VPC=12 TEST=1 bash script/method_cell.sh L31c36 "ceiling test"
+' > logs/monk3_run.out 2>&1 &
+```
+
+The cells land in `results/method/L31c36_synmb`, `L31c36_synlb`,
+`L31c36_monkb1`, `L31c36_monkb2`, `L31c36_monkb3`.
