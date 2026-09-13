@@ -1,0 +1,2 @@
+task: banking77
+class: !function banking77_task.Banking77Task

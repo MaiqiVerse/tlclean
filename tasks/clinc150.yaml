@@ -1,0 +1,2 @@
+task: clinc150
+class: !function clinc150_task.Clinc150Task

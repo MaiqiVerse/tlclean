@@ -1,0 +1,2 @@
+task: yelp_full_per_class
+class: !function yelp_full_per_class_task.YelpFullPerClass

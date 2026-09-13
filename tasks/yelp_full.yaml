@@ -1,0 +1,2 @@
+task: yelp_full
+class: !function yelp_full_task.YelpFullTask

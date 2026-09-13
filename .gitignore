@@ -1,0 +1,8 @@
+results/
+data/
+logs/
+slurm-*.out
+slurm-*.err
+__pycache__/
+*.pyc
+.hf_cache/

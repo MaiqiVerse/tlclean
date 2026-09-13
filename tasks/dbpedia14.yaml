@@ -1,0 +1,2 @@
+task: dbpedia14
+class: !function dbpedia14_task.DBPedia14Task

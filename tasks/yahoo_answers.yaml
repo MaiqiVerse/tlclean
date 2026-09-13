@@ -1,0 +1,2 @@
+task: yahoo_answers
+class: !function yahoo_answers_task.YahooAnswersTask

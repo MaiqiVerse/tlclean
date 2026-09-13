@@ -1,0 +1,2 @@
+task: trec_fine_per_class
+class: !function trec_fine_per_class_task.TRECFinePerClass

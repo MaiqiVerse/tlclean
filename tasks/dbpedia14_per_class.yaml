@@ -1,0 +1,2 @@
+task: dbpedia14_per_class
+class: !function dbpedia14_per_class_task.DBPedia14PerClass

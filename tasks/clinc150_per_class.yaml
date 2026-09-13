@@ -1,0 +1,2 @@
+task: clinc150_per_class
+class: !function clinc150_per_class_task.Clinc150PerClass
