@@ -1,0 +1,264 @@
+{
+  "spec": "prereg_method_A.md section 13.6.1 -- freeze the opponents before the viability gate",
+  "why": "a visible viability result creates room to adjust the baselines; this file makes any such adjustment visible and dateable, it does not prevent one",
+  "baselines": {
+    "deepthinking_dev": {
+      "arm_name": "Deep-Thinking-dev (paper-defined; cache-adapted)",
+      "status": "NOT-IMPLEMENTED",
+      "n_configs": 15,
+      "configs": [
+        {
+          "T": 1
+        },
+        {
+          "T": 2
+        },
+        {
+          "T": 3
+        },
+        {
+          "T": 4
+        },
+        {
+          "T": 5
+        },
+        {
+          "T": 6
+        },
+        {
+          "T": 7
+        },
+        {
+          "T": 8
+        },
+        {
+          "T": 9
+        },
+        {
+          "T": 10
+        },
+        {
+          "T": 11
+        },
+        {
+          "T": 12
+        },
+        {
+          "T": 13
+        },
+        {
+          "T": 14
+        },
+        {
+          "T": 15
+        }
+      ],
+      "config_axis": "T, the deep-thinking round. eta=0.01 and beta=0.9 are FIXED (no reproducible with-dev eta grid exists). The 15 rounds are ONE nested trajectory, the section 2.4(5) exception -- not fifteen independent configs.",
+      "placebo": {
+        "T": 1
+      },
+      "placebo_kind": "identity-bitwise-vs-same-prefix-cache-natural",
+      "hook_boundary": "prefix KV cache only. Round 1 builds the natural prefix KV; each later round runs the same prefix behind the previous KV, takes the new L positions, forms the pseudo-gradient as new-old and updates M_t = G_t + 0.9 M_{t-1}, C_t = C_{t-1} + 0.01 M_t. Canonical state is a detached bf16 legacy tuple with per-layer K/V shaped [1, num_key_value_heads, L, head_dim] -- 8 KV heads on L3.1, never expanded to 32. The query is never part of the trajectory: the deep-thinking pass is query-INDEPENDENT.",
+      "hook_boundary_sha256": "2d2036fc1c15c31ae193c12ed472f77f231399c447c1f0d95729f5f3783d2b25",
+      "selection": "three-seed-mean validation candidate NLL over the 15 snapshots; ties within 1e-8 take the smaller T",
+      "upstream": "icl/DeepThinking (Yangjiaxi/DeepThinking)"
+    },
+    "fv_on_icl": {
+      "arm_name": "Function Vectors (adapted)",
+      "status": "NOT-IMPLEMENTED",
+      "n_configs": 5,
+      "configs": [
+        {
+          "alpha": 0.0
+        },
+        {
+          "alpha": 0.25
+        },
+        {
+          "alpha": 0.5
+        },
+        {
+          "alpha": 1.0
+        },
+        {
+          "alpha": 2.0
+        }
+      ],
+      "config_axis": "alpha, the injection scale. The injection LAYER is fixed at 9 and is NOT searched -- searching it would make the grid a Cartesian product while still being called five points (section 2.4(5) forbids exactly this).",
+      "placebo": {
+        "alpha": 0.0
+      },
+      "placebo_kind": "identity-bitwise-vs-full-prompt-natural",
+      "hook_boundary": "v_FV = sum over the CIE top-10 heads of their mean answer-position output passed through that head's own W_O slice. Added as alpha * v_FV to the ANSWER ROW ONLY of decoder layer 9's residual stream. Discovery uses the first 100 discovery-split queries with prefix seeds cycling 42/43/44, and 25 label-shuffled corrupted prompts for the CIE.",
+      "hook_boundary_sha256": "05d3241f25158ddee8e703f68ebac6e3857be811b1cf73365b7eb1ecfce08b66",
+      "selection": "three-seed-mean validation candidate NLL",
+      "upstream": "icl/function_vectors (ericwtodd/function_vectors)"
+    },
+    "inductive_bc": {
+      "arm_name": "inductive probability-mean calibration (adapted from BC)",
+      "status": "IMPLEMENTED",
+      "n_configs": 1,
+      "configs": [
+        {}
+      ],
+      "config_axis": "none -- BC has no hyperparameter",
+      "placebo": null,
+      "placebo_kind": "none-possible",
+      "hook_boundary": "no model hook at all. A post-hoc transform of the candidate logits: p = softmax within the candidate set, out = softmax(p - b_s), b_s the per-class mean of p frozen on validation for prefix seed s. The forward is the stock natural one.",
+      "hook_boundary_sha256": "5feaa071434928d86a75e3d85127c9965010a5a92b18f0f617aa8b2a2a0afe20",
+      "selection": "nothing is selected; b_s is estimated, not tuned",
+      "upstream": "icl/StaICC (hc495/StaICC) prefabricate_inference/standard_calibration.py:108-134"
+    },
+    "tsla_tl_on_icl": {
+      "arm_name": "TSLA TL-head steering vector (adapted)",
+      "status": "NOT-IMPLEMENTED",
+      "n_configs": 5,
+      "configs": [
+        {
+          "alpha": 0.0
+        },
+        {
+          "alpha": 0.25
+        },
+        {
+          "alpha": 0.5
+        },
+        {
+          "alpha": 1.0
+        },
+        {
+          "alpha": 2.0
+        }
+      ],
+      "config_axis": "alpha only; injection layer fixed at 16, head count fixed at the official top-3% (30 heads)",
+      "placebo": {
+        "alpha": 0.0
+      },
+      "placebo_kind": "identity-bitwise-vs-full-prompt-natural",
+      "hook_boundary": "same injection code as fv_on_icl -- answer row of one decoder layer's residual stream, layer 16. The vector is the mean OV output of the 30 TSLA-TL heads. Label subspace = this project's label token unembeddings, projected with a frozen pinv rule whose rank is recorded. Discovery uses the first 50 discovery-split queries.",
+      "hook_boundary_sha256": "765e7a9847dc356c3e474e66373d85a56c10248d71a84b53643f9a777fbcaf1b",
+      "selection": "three-seed-mean validation candidate NLL",
+      "upstream": "icl/Localizing_TR_TL (HLYang2001/Localizing_TR_TL)"
+    },
+    "unibias_code": {
+      "arm_name": "UniBias-code (official-code reconstruction)",
+      "status": "NOT-IMPLEMENTED",
+      "n_configs": 1,
+      "configs": [
+        {
+          "discovery_search": "author flow, discovery support only"
+        }
+      ],
+      "config_axis": "the repository's internal threshold/mask/alpha search counts as ONE frozen configuration (section 2.4(5) exception). It does NOT read validation NLL.",
+      "placebo": {
+        "attention_components": [],
+        "ffn_components": []
+      },
+      "placebo_kind": "identity-bitwise-vs-full-prompt-natural",
+      "hook_boundary": "attention: o_proj INPUT pre-hook, split into 32 query heads; identification multiplies each head by its own W_O slice to rebuild the post-W_O contribution to the answer row; intervention multiplies the selected head's channels by alpha BEFORE o_proj. Per QUERY head under GQA -- the other members of the same KV group must be bitwise unchanged. FFN: identification reads the true coefficient from a down_proj input pre-hook; elimination REPLACES the selected dimensions with alpha on the up_proj OUTPUT hook (code-faithful; NOT the paper's down_proj coefficient zeroing). Order fixed: discover and install FFN first, then discover attention on the FFN-intervened model. Layers 16-31 only, zero-based.",
+      "hook_boundary_sha256": "96aab1341f6d0cb7d3af78b2d743f3a7d7407c41a405394bb61d7c1ad4b82217",
+      "selection": "none from validation; discovery-only",
+      "upstream": "icl/UniBias (hzzhou01/UniBias) commit bd7736238d8a030ae27437d1b56d5da816ec9e02"
+    },
+    "zerotuning_level1": {
+      "arm_name": "ZeroTuning-Level-1 (paper-defined; protocol-adapted)",
+      "status": "NOT-IMPLEMENTED",
+      "n_configs": 5,
+      "configs": [
+        {
+          "r": 0.5
+        },
+        {
+          "r": 1.0
+        },
+        {
+          "r": 2.0
+        },
+        {
+          "r": 4.0
+        },
+        {
+          "r": 8.0
+        }
+      ],
+      "config_axis": "r, the shared multiplier on the post-softmax BOS weight",
+      "placebo": {
+        "r": 1.0
+      },
+      "placebo_kind": "identity-bitwise-vs-full-prompt-natural",
+      "hook_boundary": "post-softmax, pre-dropout attention weights in every layer and head. A~_q0 = r A_q0 / [1 + (r-1) A_q0]; A~_qj = A_qj / [1 + (r-1) A_q0] for j != 0; the head output is then recomputed as A~ V. Touches attention WEIGHTS only -- never V, never the residual stream.",
+      "hook_boundary_sha256": "12fd0915b95c1aebc04120957ca9fb0dd6bd1321ac4cdf2438c72684c80694b5",
+      "selection": "three-seed-mean validation candidate NLL",
+      "upstream": "icl/ZeroTuning (FeijiangHan/ZeroTuning)"
+    }
+  },
+  "excluded": {
+    "yu_ananiadou": {
+      "citation": "Yu & Ananiadou, EMNLP 2024",
+      "upstream": "icl/in-context-mechanism (zepingyu0512/in-context-mechanism)",
+      "repo_dir": "in-context-mechanism",
+      "registered_commit": "f5b00cec1723d11e83b669146485c105e6f49220",
+      "status": "N/A-SETTING + BLOCKED-CODE",
+      "why": "the majority-bias intervention needs a two-class imbalanced prompt with a well-defined minority label position. This setting is 36-class and class-balanced at K=5, so that target set does not exist, and the foo/bar head taxonomy does not extend. Scaling every label uniformly, or inventing a multi-class head taxonomy, would be a NEW method wearing the authors' name. The missing code is the secondary reason; the setting is the primary one."
+    }
+  },
+  "config_cap": {
+    "max_total_configs": 5,
+    "exceptions": [
+      "unibias_code",
+      "deepthinking_dev"
+    ],
+    "cap_check": "PASS"
+  },
+  "documents": {
+    "baseline_under_review.md": "2a444315704eead2a692658cc755705a4dd499e2d750d61e58d7d558190cf355",
+    "prereg_method_A.md::13.2": "59b744db839e6fdaf61faa4eff298a8fd46d2c7829b1a1746900705534a37544",
+    "prereg_method_A.md::13.6": "74e574d7884e4e4c10598d4036749880042408b43d129829b55df9c96d9a54cc"
+  },
+  "upstream_root": "/home/jmq/project/icl",
+  "upstream_repos": {
+    "ZeroTuning": {
+      "available": true,
+      "head": "51df35b435bff8784241ae651394c0e71f46fa85",
+      "clean": true
+    },
+    "StaICC": {
+      "available": true,
+      "head": "9d135329eb4c9a8fae7e561997c964bd1da724fa",
+      "clean": true
+    },
+    "function_vectors": {
+      "available": true,
+      "head": "fb9eac7b6dc707ea1475a717379916007fe448d5",
+      "clean": true
+    },
+    "Localizing_TR_TL": {
+      "available": true,
+      "head": "39aea6d48bacc4c241de0aeabb0f4f9858050054",
+      "clean": true
+    },
+    "UniBias": {
+      "available": true,
+      "head": "bd7736238d8a030ae27437d1b56d5da816ec9e02",
+      "clean": true
+    },
+    "DeepThinking": {
+      "available": true,
+      "head": "36fada14cfcaf873486ff422783d86c4644a9eae",
+      "clean": true
+    },
+    "in-context-mechanism": {
+      "available": true,
+      "head": "f5b00cec1723d11e83b669146485c105e6f49220",
+      "clean": true
+    }
+  },
+  "stage": "spec",
+  "decision_sha256": "17042fe69bbd77cdba44b805cc5dfc443097d717bd08682b0c357a0aedd6bafe",
+  "supersedes": {
+    "path": "results/baseline_spec_freeze.json",
+    "sha256": "f724d09b3c023dd4a61d3033325f157d9e516c9381eacd86a8a29ff7ea8f2578",
+    "stage": "spec",
+    "reason": "13.2.3/13.2.4/13.2.5 corrected to match 2.4(4) and the registry (14.0b-14, 14.0b-15 chain): the abolished discovery pool, per-seed vs global vectors, and the 30-label parsing-bug remnant. No registered config, grid or hook boundary changed. Done BEFORE any viability number was seen."
+  }
+}
