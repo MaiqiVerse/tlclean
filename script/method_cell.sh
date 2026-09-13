@@ -121,6 +121,12 @@ I2CL_BS="${I2CL_BS-8}"
 TOPN="${TOPN-30}"
 TOPN_ARG=(); [ -n "${TOPN}" ] && TOPN_ARG=(--top-n ${TOPN})   # the ceiling's cuts (analyze_direct_write_accuracy)
 LIMIT="${LIMIT:-0}"                   # smoke: --limit on the GPU receivers / probes
+# GATE_N: prompts per seed the two-path noise is measured on for the receivers'
+# cache gate (prereg 14.0b-24 / 14.0b-28). One prompt per seed was the sample
+# until 2026-09-13; the receivers read hundreds, and the worst site over 900
+# prompts is not the worst over 3 (clinc150 bf16: gate 3, seed 43 met 5 ulp,
+# job 845647). Costs about four forwards per prompt at the cell's largest K.
+GATE_N="${GATE_N:-20}"
 DRY="${DRY:-0}"
 TEST="${TEST:-0}"
 SPEC_FREEZE="${SPEC_FREEZE:-results/baseline_spec_freeze_v2.json}"
@@ -221,7 +227,7 @@ level_fits () {   # level_fits KB KF -> 0 iff every prompt of both K fits this m
 echo "=============================================================="
 echo "  method cell ${MCELL}: ${MODEL} ${SE}"
 echo "  task ${TASK}   levels ${LEVELS}   K ${KS}   discovery K ${KDISC}"
-echo "  n=${NQ}/seed, validation ${VPC}/class, TSLA classes '${CLASSES}', limit ${LIMIT}"
+echo "  n=${NQ}/seed, validation ${VPC}/class, TSLA classes '${CLASSES}', limit ${LIMIT}, gate sample ${GATE_N}/seed"
 echo "  steps: ${STEPS}   skip: ${SKIP:-none}   dry: ${DRY}   code: ${HEAD0}"
 echo "  job ${SLURM_JOB_ID:-none}   $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "=============================================================="
@@ -329,7 +335,7 @@ if has precheck; then step precheck "two-path noise in ${DTYPE} under ${ATTN}, a
       if [ -f "${TPMAX}" ]; then echo "[skip] ${TPMAX}"; else
         run python tools/check_two_path_noise.py --model "${MODEL}" \
             --calibration "${CALIB}/calibration_${TASK}_K${PKMAX}_seed${PSEED}_uuid.jsonl" ${SE} \
-            --max-ulp 1000000 --json-out "${TPMAX}" \
+            --max-ulp 1000000 --n-prompts "${GATE_N}" --json-out "${TPMAX}" \
           || echo "[note] the K=${PKMAX} seed ${PSEED} two-path measurement did not run; that prompt counts as 1 ulp"
       fi
     done

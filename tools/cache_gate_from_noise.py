@@ -45,8 +45,9 @@ def gate_from_noise(doc, K, dtype):
     attn = str(r.get("attn", "eager"))
     worst = max(float(v["max_ulp"]) for v in r["by_q"].values())
     gate = max(FLOOR, float(math.ceil(worst - 1e-9)))
-    return gate, (f"check_two_path_noise K={K} {dtype} {attn} on {r.get('n_tokens', '?')} tokens: "
-                  f"worst {worst:.2f} ulp over live tails {sorted(int(q) for q in r['by_q'])}"
+    tails = sorted({int(str(k).split(":")[-1]) for k in r["by_q"]})   # keys "<q>" or "<prompt>:<q>"
+    return gate, (f"check_two_path_noise K={K} {dtype} {attn} on {r.get('n_prompts', 1)} prompt(s) of "
+                  f"{r.get('n_tokens', '?')} tokens: worst {worst:.2f} ulp over live tails {tails}"
                   + ("" if gate > FLOOR else "; the derived 1 ulp stands")), attn
 
 

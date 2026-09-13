@@ -43,36 +43,57 @@ def ulp_bf16(x):
 
 
 def measure(model_name, calibration, dtype, method="vanilla", group_size=4,
-            neighbor_size=1024, qs=(1, 12, 40), attn="eager"):
+            neighbor_size=1024, qs=(1, 12, 40), attn="eager", n_prompts=1):
+    """The two paths on the first `n_prompts` prompts of the calibration, each
+    split at every live length in `qs`. One prompt was the sample until
+    2026-09-13: the receivers then read hundreds, and the worst site over
+    900 prompts is not the worst over 3 (L31c36 x clinc150 bf16: 3 ulp on
+    one prompt per seed, 5 ulp on seed 43's 300 validation prompts, job
+    845647). `by_q` is keyed "<prompt>:<q>" when n_prompts > 1 and stays
+    "<q>" for one prompt, so cache_gate_from_noise's max over the values
+    reads both."""
     import torch
     from transformers import AutoTokenizer
     from tools.model_loader import load_model
+    rows = []
     with open(calibration, encoding="utf-8") as f:
         header = json.loads(f.readline())
-        row = json.loads(f.readline())
+        for line in f:
+            if line.strip():
+                rows.append(json.loads(line))
+            if len(rows) >= max(1, int(n_prompts)):
+                break
+    if not rows:
+        raise SystemExit(f"{calibration}: no prompt rows after the header")
     cand = [int(t) for t in header["label_token_ids"]]
     tok = AutoTokenizer.from_pretrained(model_name)
     model = load_model(model_name, method=method, dtype=dtype,
                        attn_implementation=attn, group_size=group_size,
                        neighbor_size=neighbor_size)
-    ids = tok(row["prompt"], return_tensors="pt").input_ids.to(model.device)
-    T = int(ids.shape[1])
     out = {"model": model_name, "dtype": dtype, "attn": attn, "method": method,
-           "n_tokens": T, "n_candidates": len(cand), "by_q": {}}
+           "n_tokens": None, "n_candidates": len(cand), "n_prompts": len(rows), "by_q": {}}
     with torch.no_grad():
-        mono = model(ids, use_cache=False).logits[0, -1, cand].float().cpu().numpy()
-        for q in qs:
-            pre, live = ids[:, :T - q], ids[:, T - q:]
-            o = model(pre, use_cache=True)
-            cont = model(live, past_key_values=o.past_key_values,
-                         use_cache=True).logits[0, -1, cand].float().cpu().numpy()
-            d = np.abs(cont - mono)
-            ulps = d / np.array([ulp_bf16(m) for m in mono])
-            w = int(d.argmax())
-            out["by_q"][q] = {"max_abs": float(d.max()), "max_ulp": float(ulps.max()),
-                              "n_over_1ulp": int((ulps > 1.0 + 1e-9).sum()),
-                              "argmax_same": bool(cont.argmax() == mono.argmax()),
-                              "worst_mono": float(mono[w]), "worst_cont": float(cont[w])}
+        for pi, row in enumerate(rows):
+            ids = tok(row["prompt"], return_tensors="pt").input_ids.to(model.device)
+            T = int(ids.shape[1])
+            if out["n_tokens"] is None:
+                out["n_tokens"] = T
+            mono = model(ids, use_cache=False).logits[0, -1, cand].float().cpu().numpy()
+            for q in qs:
+                pre, live = ids[:, :T - q], ids[:, T - q:]
+                o = model(pre, use_cache=True)
+                cont = model(live, past_key_values=o.past_key_values,
+                             use_cache=True).logits[0, -1, cand].float().cpu().numpy()
+                d = np.abs(cont - mono)
+                ulps = d / np.array([ulp_bf16(m) for m in mono])
+                w = int(d.argmax())
+                key = q if len(rows) == 1 else f"{pi}:{q}"
+                out["by_q"][key] = {"max_abs": float(d.max()), "max_ulp": float(ulps.max()),
+                                    "n_over_1ulp": int((ulps > 1.0 + 1e-9).sum()),
+                                    "argmax_same": bool(cont.argmax() == mono.argmax()),
+                                    "worst_mono": float(mono[w]), "worst_cont": float(cont[w]),
+                                    "n_tokens": T}
+            del o
     del model
     torch.cuda.empty_cache()
     return out
@@ -98,19 +119,32 @@ def main(argv=None) -> int:
                          "any live tail -- the categorical part of the check, which a measured "
                          "gate (prereg 14.0b-24) never relaxes")
     ap.add_argument("--json-out")
+    ap.add_argument("--n-prompts", type=int, default=1,
+                    help="prompts of the calibration to measure (the first N; each at every "
+                         "live length). 1 = the pre-2026-09-13 sample; the driver passes GATE_N")
     args = ap.parse_args(argv)
     sys.path.insert(0, ".")
     results = []
     for dt in args.dtype:
         r = measure(args.model, args.calibration, dt, args.method,
-                    args.group_size, args.neighbor_size, attn=args.attn)
+                    args.group_size, args.neighbor_size, attn=args.attn,
+                    n_prompts=args.n_prompts)
         results.append(r)
-        print(f"{args.model}  {dt}  {args.attn}  prompt {r['n_tokens']} tokens, "
+        print(f"{args.model}  {dt}  {args.attn}  {r['n_prompts']} prompt(s), first {r['n_tokens']} tokens, "
               f"{r['n_candidates']} label logits")
-        for q, v in r["by_q"].items():
-            print(f"   live q={q:>2}: max|diff| {v['max_abs']:.4f} = {v['max_ulp']:.2f} bf16-ulp, "
+        items = list(r["by_q"].items())
+        shown = items if len(items) <= 12 else sorted(items, key=lambda kv: -kv[1]["max_ulp"])[:12]
+        for q, v in shown:
+            print(f"   live q={str(q):>6}: max|diff| {v['max_abs']:.4f} = {v['max_ulp']:.2f} bf16-ulp, "
                   f"{v['n_over_1ulp']}/{r['n_candidates']} > 1 ulp, argmax same "
                   f"{v['argmax_same']}, worst {v['worst_mono']:.4f} vs {v['worst_cont']:.4f}")
+        if len(items) > 12:
+            hist = {}
+            for _q, v in items:
+                b = int(np.ceil(v["max_ulp"] - 1e-9))
+                hist[b] = hist.get(b, 0) + 1
+            print(f"   ({len(items)} (prompt, live length) pairs; the 12 worst shown; "
+                  f"worst-ulp histogram {dict(sorted(hist.items()))})")
     last = results[-1]
     worst = max(v["max_ulp"] for v in last["by_q"].values())
     flips = [q for q, v in last["by_q"].items() if not v["argmax_same"]]
