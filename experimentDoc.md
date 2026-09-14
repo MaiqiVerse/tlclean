@@ -119,3 +119,54 @@ The cells land in `results/method/L31k40_synmb`, `L31k40_synlb` and
 levels are pairs `K_base:K_full` with nested draws, so any pair the bank
 supports can be given the same way; `KDISC` is the K at which the carriers
 are discovered (the text tasks use their first level's `K_full`).
+
+## TREC-fine at K = 10 → 20 (Llama-3.1-8B; a 40 GB card and `ATTN=sdpa`)
+
+The paper's TREC-fine rows stop at 5 → 10. The next level, a K = 10
+receiver reading a K = 20 memory, is the same cell with one more pair and
+nothing else changed: the carriers are discovered at K = 5 as for the other
+rows (`KDISC` keeps its default, and the K = 5 calibration prompts are
+built for that), the validation draw is 4 queries per class (144 per seed
+over the 36 classes), the test draw 250 per seed.
+
+```
+mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
+  LEVELS="10:20" ATTN=sdpa bash script/method_cell.sh L31c36 \
+  && LEVELS="10:20" ATTN=sdpa SPEC_FREEZE=none TEST=1 bash script/method_cell.sh L31c36 "ceiling test"
+' > logs/trec_k20_run.out 2>&1 &
+```
+
+`ATTN=sdpa` is required, not a preference. The K = 20 prompt is about
+12.3k tokens (36 classes × 20 demonstrations at ~17 tokens each; the K = 10
+prompt is 6.1–6.2k, K = 5 is 3.0–3.1k), and HF's eager attention
+materialises a [32 heads, T, T] score matrix per layer: one 12k-token
+forward of this model under eager ran out of memory on a 47 GiB card (41.5
+GiB allocated when it asked for 17.2 more), while the same forward under
+the fused kernel peaks at 19.4 GiB. The cell's precheck measures the
+kernel's two-path noise and sets the receivers' cache gate to it (about one
+bfloat16 step under sdpa, as under eager).
+
+Memory, measured on this model in bfloat16:
+
+| what | GiB |
+|---|---|
+| weights | 15.0 |
+| one K = 20 forward (12,000 tokens), `sdpa` | 19.4 (19.7 at 12,800) |
+| the same forward under eager attention | out of memory on 47 GiB |
+| a K = 20 prefix cache (128 KiB per token) | 1.5 |
+| the receiver: one forward + the base cache + one steered copy at a time | ≈ 22–23 |
+
+The steps above that are FV's attribution-patching backward passes through
+its 6k-token extraction prompts (359 of the extra demonstrations each) and
+the exact-CIE forwards; they are the peak of the chain, not the memory
+reads. The reference point is the dbpedia cell in the paper, whose prompts
+have the same lengths (11–12k tokens for its K = 10 memory, 5.7k for its FV
+prompts): its whole chain and its test read ran on a 40 GB A100 under sdpa,
+8 h 14 min and 7 h 38 min. Expect the same here: a 40 GB card runs the
+pair, an 80 GB card is comfortable, a 24 GB card is not enough (the
+one-forward peak alone is 19.4 GiB and the backward passes need more than
+the remaining 5). The pair takes about a day on one card; the I2CL
+calibration and the 750-query test reads are most of it. The summary at
+the end of each half prints the table rows for `10 -> 20` in the paper's
+format; a sdpa cell is marked as such beside the eager K ≤ 10 rows, as the
+dbpedia and yahoo rows are.
