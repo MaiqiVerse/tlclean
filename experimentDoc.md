@@ -60,17 +60,26 @@ step (about half an hour per seed per level).
 The three synthetic datasets ship as shared-bank tasks -- one fixed hidden
 concept per task, a training bank the demonstrations are drawn from and a
 disjoint test pool: `synthetic_mlp_bank_per_class` and
-`synthetic_linear_bank_per_class` (generated in memory from
-`function_seed=0`) and `monk_bank_r1_per_class` (Monk-1, the UCI files
-under `tasks/monk/`). Nothing is downloaded. The same two commands with
-the task name; the default levels (`0:5 2:5 5:10`, discovery at K = 5)
-fit all three, and the prompts are short, so a pair takes hours rather
-than a day:
+`synthetic_linear_bank_per_class` (six classes each, generated in memory
+from `function_seed=0`, 60 bank rows per class) and `monk_bank_r1_per_class`
+(Monk-1, two classes, the UCI files under `tasks/monk/`, 62 bank rows per
+class). Nothing is downloaded.
+
+These tasks need more demonstrations than the text tasks before the model
+learns anything from them: on Llama-3.1-8B the linear concept reads at
+chance with 5 demonstrations per class and only at 30 % with 10, Monk-1 at
+59 % with 10 (chance 50), so the default levels of the text tasks (`0:5 2:5
+5:10`) leave nothing for a memory to carry. Run them at `10:20 20:40` with
+the carriers discovered at K = 20, under a tag of your own with the model
+named explicitly (any unregistered tag works when `MODEL=` and `DTYPE=` are
+given; the tag keeps the cell's directories apart from a K = 5 run of the
+same task). The prompts stay short (K = 40 is 3--6k tokens), so a pair takes
+hours rather than a day.
 
 ```
 mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
-  TASK=synthetic_mlp_bank_per_class bash script/method_cell.sh L31c36 \
-  && TASK=synthetic_mlp_bank_per_class TEST=1 bash script/method_cell.sh L31c36 "ceiling test"
+  MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=synthetic_mlp_bank_per_class LEVELS="10:20 20:40" KDISC=20 bash script/method_cell.sh L31k40 \
+  && MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=synthetic_mlp_bank_per_class LEVELS="10:20 20:40" KDISC=20 TEST=1 bash script/method_cell.sh L31k40 "ceiling test"
 ' > logs/synmlp_run.out 2>&1 &
 ```
 
@@ -78,21 +87,24 @@ The linear one:
 
 ```
 mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
-  TASK=synthetic_linear_bank_per_class bash script/method_cell.sh L31c36 \
-  && TASK=synthetic_linear_bank_per_class TEST=1 bash script/method_cell.sh L31c36 "ceiling test"
+  MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=synthetic_linear_bank_per_class LEVELS="10:20 20:40" KDISC=20 bash script/method_cell.sh L31k40 \
+  && MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=synthetic_linear_bank_per_class LEVELS="10:20 20:40" KDISC=20 TEST=1 bash script/method_cell.sh L31k40 "ceiling test"
 ' > logs/synlin_run.out 2>&1 &
 ```
 
 Monk-1 has two classes, so the default 4 validation queries per class
-give a seed only 8; `VPC=12` gives 24 (the bank keeps 50 per class for
-the demonstrations, enough for K = 10):
+give a seed only 8; `VPC=12` gives 24, and the bank keeps 50 per class for
+the demonstrations, enough for K = 40:
 
 ```
 mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
-  TASK=monk_bank_r1_per_class VPC=12 bash script/method_cell.sh L31c36 \
-  && TASK=monk_bank_r1_per_class VPC=12 TEST=1 bash script/method_cell.sh L31c36 "ceiling test"
+  MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=monk_bank_r1_per_class VPC=12 LEVELS="10:20 20:40" KDISC=20 bash script/method_cell.sh L31k40 \
+  && MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=monk_bank_r1_per_class VPC=12 LEVELS="10:20 20:40" KDISC=20 TEST=1 bash script/method_cell.sh L31k40 "ceiling test"
 ' > logs/monk1_run.out 2>&1 &
 ```
 
-The cells land in `results/method/L31c36_synmb`, `L31c36_synlb` and
-`L31c36_monkb1`.
+The cells land in `results/method/L31k40_synmb`, `L31k40_synlb` and
+`L31k40_monkb1`, their calibration prompts under `data/method/L31k40/`. The
+levels are pairs `K_base:K_full` with nested draws, so any pair the bank
+supports can be given the same way; `KDISC` is the K at which the carriers
+are discovered (the text tasks use their first level's `K_full`).
