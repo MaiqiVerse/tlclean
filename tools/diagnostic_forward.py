@@ -124,10 +124,17 @@ def _patch_tl_attention_capture(model, layers_needed, answer_position, key_pad=N
             # Output is (attn_output, attn_weights, [past_key_value]).
             if isinstance(out, tuple) and len(out) >= 2 and out[1] is not None:
                 attn_weights = out[1]
-                # [B=1, num_heads, q_len, kv_len]; slice answer-row, ship to cap_dev
+                # [B=1, num_heads, q_len, kv_len]; slice answer-row, ship to cap_dev.
+                # copy=True: the slice is a VIEW of the whole [H, L, L] matrix,
+                # and when cap_dev is the model's device and the model is
+                # already float32, .to() without it returns that view and
+                # keeps every layer's full attention matrix alive -- 36 x
+                # 1.1 GB on Qwen3-4B fp32 at 3k tokens, which is how the
+                # test-split ceiling probe ran out of memory (job 846387).
+                # A bf16 model never showed it: the dtype change forced the copy.
                 captured[_lidx] = (
                     attn_weights[0, :, answer_position, :]
-                    .detach().to(cap_dev, torch.float32)
+                    .detach().to(device=cap_dev, dtype=torch.float32, copy=True)
                 )
                 # Replace with None to drop the GPU reference at layer exit.
                 return (out[0], None) + tuple(out[2:])
@@ -348,12 +355,15 @@ def _run_capture_forward(
                 # untouched, so the whole patch path executes and changes
                 # nothing. Gate 2.
                 out = raw.unsqueeze(0)
-            v_raw_cache[layer_idx] = raw.detach().to(cap_dev)   # donors come from here
+            # copy=True on both: on the model's own device .to() is otherwise a
+            # no-op that keeps the module's output tensor alive (see the
+            # attention capture above for the case that mattered)
+            v_raw_cache[layer_idx] = raw.detach().to(device=cap_dev, copy=True)   # donors come from here
             v = raw.view(n_tokens, n_kv_heads, d_head)
             v = v.transpose(0, 1).contiguous()               # [n_kv_heads, n_tok, d_head]
             if n_kv_heads != n_attn_heads:
                 v = v.repeat_interleave(n_attn_heads // n_kv_heads, dim=0)
-            v_cache[layer_idx] = v.detach().to(cap_dev)
+            v_cache[layer_idx] = v.detach().to(device=cap_dev, copy=True)
             if patch_v and layer_idx in patch_v:
                 # returning a value replaces the module's output downstream
                 return out if is_tensor else (out,) + tuple(output[1:])
