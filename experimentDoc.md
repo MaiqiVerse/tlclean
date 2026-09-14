@@ -37,7 +37,7 @@ Llama-3.1-8B on banking77 (K = 1 receiver reading a K = 2 memory; float32):
 ```
 mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
   TASK=banking77_per_class LEVELS="0:2 1:2" KDISC=2 DTYPE=float32 bash script/method_cell.sh L31c36 \
-  && TASK=banking77_per_class LEVELS="0:2 1:2" KDISC=2 DTYPE=float32 TEST=1 bash script/method_cell.sh L31c36 "ceiling test"
+  && TASK=banking77_per_class LEVELS="0:2 1:2" KDISC=2 DTYPE=float32 SPEC_FREEZE=none TEST=1 bash script/method_cell.sh L31c36 "ceiling test"
 ' > logs/bk77_run.out 2>&1 &
 ```
 
@@ -47,13 +47,24 @@ the tag's default is float32):
 ```
 mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
   LEVELS="0:5 2:5" bash script/method_cell.sh Q3c36 \
-  && LEVELS="0:5 2:5" TEST=1 bash script/method_cell.sh Q3c36 "ceiling test"
+  && LEVELS="0:5 2:5" SPEC_FREEZE=none TEST=1 bash script/method_cell.sh Q3c36 "ceiling test"
 ' > logs/Q3_run.out 2>&1 &
 ```
 
 The second command of each pair starts only if the first finished cleanly.
 Each pair takes about a day on one card; the I2CL calibration is the slow
 step (about half an hour per seed per level).
+
+`SPEC_FREEZE=none` in the test half: the test read binds a freeze manifest,
+and in the full tree that manifest also registers a baseline spec freeze
+whose validation reads documents this tree does not carry. With `none` the
+lock opener records the literal instead of a file, the lock refuses it by
+name, and the UNSAFE wrapper discards that one blocker and writes it into
+the cell's `UNSAFE/` record -- the same thing it does with the spec-stage
+blocker in the full tree. Everything else the lock checks (the query
+manifest, carriers, label space and gammas are hashed when the lock is
+opened and re-checked on every read) stays fatal. Without it the test half
+stops at `[abort] results/baseline_spec_freeze_v2.json not found`.
 
 ## The generated tasks (no download)
 
@@ -79,7 +90,7 @@ hours rather than a day.
 ```
 mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
   MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=synthetic_mlp_bank_per_class LEVELS="10:20 20:40" KDISC=20 bash script/method_cell.sh L31k40 \
-  && MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=synthetic_mlp_bank_per_class LEVELS="10:20 20:40" KDISC=20 TEST=1 bash script/method_cell.sh L31k40 "ceiling test"
+  && MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=synthetic_mlp_bank_per_class LEVELS="10:20 20:40" KDISC=20 SPEC_FREEZE=none TEST=1 bash script/method_cell.sh L31k40 "ceiling test"
 ' > logs/synmlp_run.out 2>&1 &
 ```
 
@@ -88,7 +99,7 @@ The linear one:
 ```
 mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
   MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=synthetic_linear_bank_per_class LEVELS="10:20 20:40" KDISC=20 bash script/method_cell.sh L31k40 \
-  && MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=synthetic_linear_bank_per_class LEVELS="10:20 20:40" KDISC=20 TEST=1 bash script/method_cell.sh L31k40 "ceiling test"
+  && MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=synthetic_linear_bank_per_class LEVELS="10:20 20:40" KDISC=20 SPEC_FREEZE=none TEST=1 bash script/method_cell.sh L31k40 "ceiling test"
 ' > logs/synlin_run.out 2>&1 &
 ```
 
@@ -99,7 +110,7 @@ the demonstrations, enough for K = 40:
 ```
 mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
   MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=monk_bank_r1_per_class VPC=12 LEVELS="10:20 20:40" KDISC=20 bash script/method_cell.sh L31k40 \
-  && MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=monk_bank_r1_per_class VPC=12 LEVELS="10:20 20:40" KDISC=20 TEST=1 bash script/method_cell.sh L31k40 "ceiling test"
+  && MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=monk_bank_r1_per_class VPC=12 LEVELS="10:20 20:40" KDISC=20 SPEC_FREEZE=none TEST=1 bash script/method_cell.sh L31k40 "ceiling test"
 ' > logs/monk1_run.out 2>&1 &
 ```
 

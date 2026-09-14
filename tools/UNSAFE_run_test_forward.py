@@ -135,7 +135,9 @@ def marker_faults():
 
 
 def is_the_accepted_blocker(b) -> bool:
-    """ONLY the spec-stage one. Everything else stays fatal."""
+    """ONLY the spec-stage one -- or its SPEC_FREEZE=none form, which
+    carries the same sentence (prereg 14.0b-30). Everything else stays
+    fatal."""
     return isinstance(b, str) and SPEC_STAGE_MARKER in b
 
 

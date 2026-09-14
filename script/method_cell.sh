@@ -698,8 +698,15 @@ if has test; then
   step test "the one-shot test_seed read of every level (UNSAFE wrapper, prereg 14.0b-23)"
   UDIR="${OUT}/UNSAFE"; mkdir -p "${UDIR}"
   FREEZE="${UDIR}/UNSAFE_freeze_manifest.json"
-  if [ ! -f "${SPEC_FREEZE}" ] && [ "${DRY}" != "1" ]; then
-    echo "[abort] ${SPEC_FREEZE} not found: the lock opener binds the baseline spec freeze; SPEC_FREEZE=... to point at it"; exit 1
+  # SPEC_FREEZE=none: a checkout without the baseline spec documents and the
+  # upstream repositories (the public tree) cannot write or validate a spec
+  # freeze; the lock opener registers the literal, freeze_manifest_blockers
+  # refuses it by name and the UNSAFE bypass discards and records that one
+  # blocker, as it does a spec-stage freeze (prereg 14.0b-30).
+  if [ "${SPEC_FREEZE}" = "none" ]; then
+    echo "  SPEC_FREEZE=none: no baseline spec freeze in this checkout; the UNSAFE record will carry the discarded blocker"
+  elif [ ! -f "${SPEC_FREEZE}" ] && [ "${DRY}" != "1" ]; then
+    echo "[abort] ${SPEC_FREEZE} not found: the lock opener binds the baseline spec freeze; SPEC_FREEZE=... to point at it, or SPEC_FREEZE=none in a checkout that has no spec documents to freeze"; exit 1
   fi
   if done_ok "${FREEZE}"; then echo "[skip] ${FREEZE}"; else
     run python tools/UNSAFE_open_test_lock.py --gamma-group 1.0 --query-manifest "${QM}" \

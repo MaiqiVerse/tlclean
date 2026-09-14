@@ -215,6 +215,11 @@ FREEZE_KIND = "prereg_method_A_freeze_manifest"
 # manifest that does not register these is not evidence of that freeze, so
 # each is required BY ROLE -- a path is easy to omit by accident, a named role
 # is not.
+# The literal a freeze manifest's spec_freeze role carries when the checkout
+# has no baseline spec documents to freeze (the public tree): see
+# write_freeze_manifest and the blocker freeze_manifest_blockers returns for it.
+NO_SPEC_FREEZE = "none"
+
 FREEZE_ROLES = {
     "query_manifest": "the draws being scored",
     "carriers":       "the control carriers/positions (section 2.1)",
@@ -306,7 +311,16 @@ def write_freeze_manifest(path, *, query_manifest, carriers, label_space,
     roles = {"query_manifest": query_manifest, "carriers": carriers,
              "label_space": label_space, "gammas": gammas,
              "spec_freeze": spec_freeze}
-    missing = [r for r, p in roles.items() if not Path(p).is_file()]
+    # SPEC_FREEZE=none (NO_SPEC_FREEZE): a checkout without the baseline spec
+    # documents and the upstream repositories -- the public tree -- has
+    # nothing to freeze at the spec stage. The role records the literal,
+    # nothing is hashed for it, and freeze_manifest_blockers turns it into
+    # the one blocker the UNSAFE bypass discards and records, so a test read
+    # there is exactly as optional/descriptive as one behind a spec-stage
+    # freeze (prereg 14.0b-30). Every other role is still a real, hashed file.
+    hashed = {r: p for r, p in roles.items()
+              if not (r == "spec_freeze" and str(p) == NO_SPEC_FREEZE)}
+    missing = [r for r, p in hashed.items() if not Path(p).is_file()]
     if missing:
         raise FileNotFoundError(
             f"cannot write a freeze manifest: {missing} do not exist. A "
@@ -315,7 +329,7 @@ def write_freeze_manifest(path, *, query_manifest, carriers, label_space,
         "kind": FREEZE_KIND,
         "roles": {r: str(p) for r, p in roles.items()},
         "files": {str(p): hashlib.sha256(Path(p).read_bytes()).hexdigest()
-                  for p in list(roles.values()) + list(extra)},
+                  for p in list(hashed.values()) + list(extra)},
     }
     Path(path).write_text(json.dumps(doc, indent=2, ensure_ascii=False),
                           encoding="utf-8")
@@ -396,6 +410,9 @@ def freeze_manifest_blockers(path, *, expected_roles=None):
         if not rel:
             bad.append(f"no {role!r} role -- {why}")
             continue
+        if role == "spec_freeze" and rel == NO_SPEC_FREEZE:
+            resolved[role] = rel      # nothing to pin; refused below, by name
+            continue
         if not any(_same_file(rel, k) for k in files):
             bad.append(f"role {role!r} names {rel}, which is not registered "
                        "in 'files', so nothing pins its contents")
@@ -423,6 +440,17 @@ def freeze_manifest_blockers(path, *, expected_roles=None):
     if gfaults:
         return gfaults
 
+    if resolved["spec_freeze"] == NO_SPEC_FREEZE:
+        # The public tree: no spec documents, no upstream repositories, so
+        # no spec freeze can be written or validated there. This is refused
+        # like a spec-stage freeze is -- the same sentence, so that the
+        # UNSAFE bypass (and only it) discards and records it -- and it
+        # keeps every other blocker above (roles, hashes, the gammas).
+        return [f"no spec freeze is registered (SPEC_FREEZE={NO_SPEC_FREEZE}: "
+                "this checkout carries no baseline spec documents to freeze), "
+                f"which stands as a {NO_SPEC_FREEZE!r}-stage freeze. Section 2.1 "
+                "requires the analysis code frozen before any test prediction, "
+                "and only the code stage records that"]
     spec_path = Path(resolved["spec_freeze"])
     try:
         rec = json.loads(spec_path.read_text(encoding="utf-8"))
