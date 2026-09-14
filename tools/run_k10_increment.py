@@ -652,25 +652,47 @@ def main(argv=None) -> int:
             base_cache = model(pre_ids, use_cache=True).past_key_values
         # ICV edits every position, so its prefix is a DIFFERENT prefix: one
         # cache per lambda, prefilled with the hooks installed (the spec's
-        # "the injected prefix KV once per seed").
-        icv_caches = {}
-        for _lam in [l for l in icv_lams if icv_arms(args.K_full, [l])[0] in todo]:
+        # "the injected prefix KV once per seed"); I2CL likewise. They are
+        # built ONE AT A TIME, each in its own pass over the queries after
+        # the natural-prefix arms, and freed after it. Keeping every steered
+        # cache resident put the K=10 prefix of an MHA model (Llama-2: about
+        # 4 GB per cache, five lambdas) beside the weights and the base cache
+        # and OOMed SEc36's k10 on a 40 GB card (job 845845). The forwards
+        # are the same as before -- the same hooks on the same ids build the
+        # same cache, and every arm continues it with the same suffix -- so
+        # the logits do not change; only the order of the arms does.
+        def build_icv_cache(_lam):
             _h = icv_hooks(model, icv_v[s], _lam, torch)
             try:
                 with torch.no_grad():
-                    icv_caches[_lam] = model(pre_ids, use_cache=True).past_key_values
+                    return model(pre_ids, use_cache=True).past_key_values
             finally:
                 for _x in _h:
                     _x.remove()
-        i2cl_cache = None
-        if i2cl_v is not None and i2cl_arm(args.K_full) in todo:
+
+        def build_i2cl_cache():
             _h = i2cl_module_hooks(model, i2cl_v[s]["cv"], i2cl_v[s]["coef"], torch)
             try:
                 with torch.no_grad():
-                    i2cl_cache = model(pre_ids, use_cache=True).past_key_values
+                    return model(pre_ids, use_cache=True).past_key_values
             finally:
                 for _x in _h:
                     _x.remove()
+
+        def _steered(arm):
+            """('ICV', lam) / ('I2CL',) for an arm that continues a hooked
+            prefix; None for every arm that continues the natural one (the
+            a=0 arms included: 0 * v adds nothing, they ARE base forwards)."""
+            _pv = parse_vector_arm(arm)
+            if _pv is None or _pv[3] == 0.0 or _pv[0] not in ("ICV", "I2CL"):
+                return None
+            return ("ICV", _pv[3]) if _pv[0] == "ICV" else ("I2CL",)
+        todo_base = [a for a in todo if _steered(a) is None]
+        steered_passes = []
+        for _a in todo:
+            _g = _steered(_a)
+            if _g is not None and _g not in [g for g, _ in steered_passes]:
+                steered_passes.append((_g, [b for b in todo if _steered(b) == _g]))
 
         first = render_prompt(blocks, text_of[rows[0]["query_id"]])
         _ids, seg, _lab, _cls = segment_positions(first, tok,
@@ -804,7 +826,7 @@ def main(argv=None) -> int:
                     "begin with its own prefix at the token level")
             suffix = fid[:, n_pre:]
             n_live = int(suffix.shape[1])
-            for arm in todo:
+            for arm in todo_base:
                 if arm == ARM_MONO:
                     with torch.no_grad():
                         lg = model(fid).logits[0, -1]
@@ -825,15 +847,10 @@ def main(argv=None) -> int:
                 handles += install_vector_arm(model, arm, s, fv_v, tv,
                                               inject_hook, torch, icv=icv_v,
                                               i2cl=i2cl_v)
-                # an ICV / I2CL arm continues ITS OWN prefix (hooked at every
-                # position); every other arm continues the natural one
+                # every arm of this pass continues the natural prefix; the
+                # ICV / I2CL arms at a nonzero strength continue THEIR OWN
+                # hooked prefix and run in the steered passes below
                 cache = base_cache
-                _pv = parse_vector_arm(arm)
-                if _pv is not None and _pv[3] != 0.0:
-                    if _pv[0] == "ICV":
-                        cache = icv_caches[_pv[3]]
-                    elif _pv[0] == "I2CL":
-                        cache = i2cl_cache
                 try:
                     cache.crop(n_pre)
                     with torch.no_grad():
@@ -897,6 +914,39 @@ def main(argv=None) -> int:
                           f"{ARM_BASE!r} elementwise")
             if (qi + 1) % 40 == 0:
                 print(f"    {qi + 1}/{len(rows)}", flush=True)
+
+        # the steered arms: one hooked prefix cache at a time, its arms over
+        # every query (the same suffix forwards the single loop above ran),
+        # then the cache is freed before the next one is built
+        for _g, _arms in steered_passes:
+            pass_cache = (build_icv_cache(_g[1]) if _g[0] == "ICV"
+                          else build_i2cl_cache())
+            print(f"    steered pass {_g}: {len(_arms)} arm(s)", flush=True)
+            for qi, r in enumerate(rows):
+                full = render_prompt(blocks, text_of[r["query_id"]])
+                fid = tok(full, return_tensors="pt").input_ids.to(model.device)
+                suffix = fid[:, n_pre:]
+                n_live = int(suffix.shape[1])
+                for arm in _arms:
+                    handles = _install_rows(model, rows_by_arm[arm], n_live, torch)
+                    handles += install_vector_arm(model, arm, s, fv_v, tv,
+                                                  inject_hook, torch, icv=icv_v,
+                                                  i2cl=i2cl_v)
+                    try:
+                        pass_cache.crop(n_pre)
+                        with torch.no_grad():
+                            lg = model(suffix, past_key_values=pass_cache,
+                                       use_cache=True).logits[0, -1]
+                    finally:
+                        for h in handles:
+                            h.remove()
+                        pass_cache.crop(n_pre)
+                    out[arm].setdefault(s, []).append(
+                        lg[cand].to(torch.float64).cpu().numpy())
+                if (qi + 1) % 40 == 0:
+                    print(f"    {_g} {qi + 1}/{len(rows)}", flush=True)
+            del pass_cache
+            torch.cuda.empty_cache()
 
     meta_doc = {
             "spec": "EXPLORATORY: RESULTS 45's construction one level up",

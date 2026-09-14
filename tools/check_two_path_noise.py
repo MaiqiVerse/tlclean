@@ -42,6 +42,35 @@ def ulp_bf16(x):
     return 2.0 ** (e - 7)
 
 
+def top2_margin_ulp(v):
+    """The gap between the two largest label logits, in bf16 ulp at the
+    largest one: how far the argmax is from a tie on that path."""
+    s = np.sort(np.asarray(v, dtype=np.float64))[::-1]
+    if s.size < 2:
+        return float("inf")
+    return float((s[0] - s[1]) / ulp_bf16(float(s[0])))
+
+
+def flip_verdict(by_q):
+    """The argmax flips of a run, split into REAL disagreements and TIES.
+    A flip on a tail is a tie when, on either path, the top-two margin of
+    the label logits is within that tail's own noise (its max ulp, floored
+    at 1, the smallest bf16 step): the argmax is not defined there at this
+    precision, so the two paths cannot be said to disagree on it (prereg
+    14.0b-29; the synthetic linear bank at K=2 sits one bf16 step from a
+    six-way tie, job 846377). Entries without margins (older json) count
+    as real, as they always did."""
+    real, ties = [], []
+    for q, v in by_q.items():
+        if v.get("argmax_same", True):
+            continue
+        noise = max(1.0, float(v.get("max_ulp", 0.0)))
+        m = min(float(v.get("margin_mono_ulp", np.inf)),
+                float(v.get("margin_cont_ulp", np.inf)))
+        (ties if m <= noise + 1e-9 else real).append(q)
+    return real, ties
+
+
 def measure(model_name, calibration, dtype, method="vanilla", group_size=4,
             neighbor_size=1024, qs=(1, 12, 40), attn="eager", n_prompts=1):
     """The two paths on the first `n_prompts` prompts of the calibration, each
@@ -92,6 +121,9 @@ def measure(model_name, calibration, dtype, method="vanilla", group_size=4,
                                     "n_over_1ulp": int((ulps > 1.0 + 1e-9).sum()),
                                     "argmax_same": bool(cont.argmax() == mono.argmax()),
                                     "worst_mono": float(mono[w]), "worst_cont": float(cont[w]),
+                                    # how far each path's argmax is from a tie (flip_verdict)
+                                    "margin_mono_ulp": top2_margin_ulp(mono),
+                                    "margin_cont_ulp": top2_margin_ulp(cont),
                                     "n_tokens": T}
             del o
     del model
@@ -147,11 +179,15 @@ def main(argv=None) -> int:
                   f"worst-ulp histogram {dict(sorted(hist.items()))})")
     last = results[-1]
     worst = max(v["max_ulp"] for v in last["by_q"].values())
-    flips = [q for q, v in last["by_q"].items() if not v["argmax_same"]]
-    ok = worst <= args.max_ulp and not (args.require_argmax and flips)
+    real, ties = flip_verdict(last["by_q"])
+    last["flips"] = {"real": [str(q) for q in real], "ties": [str(q) for q in ties]}
+    ok = worst <= args.max_ulp and not (args.require_argmax and real)
     print(f"\n  {'[PASS]' if ok else '[FAIL]'} {last['dtype']}: worst {worst:.2f} ulp against "
           f"the gate's {args.max_ulp:g}"
-          + (f"; argmax differs on live tail(s) {flips}" if flips else "; argmax agrees on every tail")
+          + (f"; argmax differs on live tail(s) {real}" if real else "; argmax agrees on every tail")
+          + (f"; a tie within the noise on tail(s) {ties} (the top-two margin on a path is within "
+             "that tail's ulp: the argmax is not defined there at this precision, prereg 14.0b-29)"
+             if ties else "")
           + ("" if ok else
              " -- the two paths disagree beyond what this run allows; under prereg 14.0b-24 the "
              "receivers' gate is the noise measured at the cell's largest K, but an argmax flip "
