@@ -66,60 +66,6 @@ manifest, carriers, label space and gammas are hashed when the lock is
 opened and re-checked on every read) stays fatal. Without it the test half
 stops at `[abort] results/baseline_spec_freeze_v2.json not found`.
 
-## The generated tasks (no download)
-
-The three synthetic datasets ship as shared-bank tasks -- one fixed hidden
-concept per task, a training bank the demonstrations are drawn from and a
-disjoint test pool: `synthetic_mlp_bank_per_class` and
-`synthetic_linear_bank_per_class` (six classes each, generated in memory
-from `function_seed=0`, 60 bank rows per class) and `monk_bank_r1_per_class`
-(Monk-1, two classes, the UCI files under `tasks/monk/`, 62 bank rows per
-class). Nothing is downloaded.
-
-These tasks need more demonstrations than the text tasks before the model
-learns anything from them: on Llama-3.1-8B the linear concept reads at
-chance with 5 demonstrations per class and only at 30 % with 10, Monk-1 at
-59 % with 10 (chance 50), so the default levels of the text tasks (`0:5 2:5
-5:10`) leave nothing for a memory to carry. Run them at `10:20 20:40` with
-the carriers discovered at K = 20, under a tag of your own with the model
-named explicitly (any unregistered tag works when `MODEL=` and `DTYPE=` are
-given; the tag keeps the cell's directories apart from a K = 5 run of the
-same task). The prompts stay short (K = 40 is 3--6k tokens), so a pair takes
-hours rather than a day.
-
-```
-mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
-  MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=synthetic_mlp_bank_per_class LEVELS="10:20 20:40" KDISC=20 bash script/method_cell.sh L31k40 \
-  && MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=synthetic_mlp_bank_per_class LEVELS="10:20 20:40" KDISC=20 SPEC_FREEZE=none TEST=1 bash script/method_cell.sh L31k40 "ceiling test"
-' > logs/synmlp_run.out 2>&1 &
-```
-
-The linear one:
-
-```
-mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
-  MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=synthetic_linear_bank_per_class LEVELS="10:20 20:40" KDISC=20 bash script/method_cell.sh L31k40 \
-  && MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=synthetic_linear_bank_per_class LEVELS="10:20 20:40" KDISC=20 SPEC_FREEZE=none TEST=1 bash script/method_cell.sh L31k40 "ceiling test"
-' > logs/synlin_run.out 2>&1 &
-```
-
-Monk-1 has two classes, so the default 4 validation queries per class
-give a seed only 8; `VPC=12` gives 24, and the bank keeps 50 per class for
-the demonstrations, enough for K = 40:
-
-```
-mkdir -p logs && CUDA_VISIBLE_DEVICES=0 nohup bash -c '
-  MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=monk_bank_r1_per_class VPC=12 LEVELS="10:20 20:40" KDISC=20 bash script/method_cell.sh L31k40 \
-  && MODEL=meta-llama/Llama-3.1-8B DTYPE=bfloat16 TASK=monk_bank_r1_per_class VPC=12 LEVELS="10:20 20:40" KDISC=20 SPEC_FREEZE=none TEST=1 bash script/method_cell.sh L31k40 "ceiling test"
-' > logs/monk1_run.out 2>&1 &
-```
-
-The cells land in `results/method/L31k40_synmb`, `L31k40_synlb` and
-`L31k40_monkb1`, their calibration prompts under `data/method/L31k40/`. The
-levels are pairs `K_base:K_full` with nested draws, so any pair the bank
-supports can be given the same way; `KDISC` is the K at which the carriers
-are discovered (the text tasks use their first level's `K_full`).
-
 ## TREC-fine at K = 10 → 20 (Llama-3.1-8B; a 40 GB card and `ATTN=sdpa`)
 
 The paper's TREC-fine rows stop at 5 → 10. The next level, a K = 10
