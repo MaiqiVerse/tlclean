@@ -457,12 +457,23 @@ def argmax_tie_bound(mono, ic, im, max_ulp=MAX_ULP):
     tie -- working rules 11's "a tolerance may not equal the deviation it is
     explaining away", which is exactly the mistake this line replaced.
 
-    Two reduction orders agree to within `max_ulp` grid steps; taking the
-    coarser of the two candidates' grids is the widest that bound can be.
+    Two reduction orders agree to within `max_ulp` grid steps PER CANDIDATE,
+    and a swap involves two candidates: the one on top can come down by
+    `max_ulp` while the runner-up goes up by `max_ulp`, so an argmax flip is
+    reachable whenever the monolithic gap is at most TWICE that bound (at
+    exactly twice, only as a tie). Taking the coarser of the two candidates'
+    grids is the widest the per-candidate bound can be.
+
+    ⚠ The first version returned ONE bound -- half the reachable width -- and
+    failed a correct cache on Monk-2 K=20->40 seed 42 (job 847951):
+    monolithic 28.125 / 28.375, cached 28.250 / 28.250. Two 1-ulp errors of
+    opposite sign closed a 2-ulp gap to a tie; the ulp half of the gate
+    passed (both candidates at exactly 1 ulp) and the argmax half called a
+    flip the arithmetic permits a fault (prereg 14.0b-31).
     """
     m = np.asarray(mono, dtype=np.float64)
-    return float(max_ulp) * float(max(bf16_ulp(np.array([m[ic]]))[0],
-                                      bf16_ulp(np.array([m[im]]))[0]))
+    return 2.0 * float(max_ulp) * float(max(bf16_ulp(np.array([m[ic]]))[0],
+                                            bf16_ulp(np.array([m[im]]))[0]))
 
 
 def argmax_swap_note(cached, mono, max_ulp=MAX_ULP):
@@ -484,9 +495,10 @@ def argmax_swap_note(cached, mono, max_ulp=MAX_ULP):
     if gap > bound:
         return None
     return (f"NEAR-TIE argmax swap: cached {ic} vs monolithic {im}, and the "
-            f"monolithic gap between them is {gap:.6f}, within the "
+            f"monolithic gap between them is {gap:.6f}, within twice the "
             f"{max_ulp:g}-ulp agreement two reduction orders can be asked for "
-            f"({bound:.6f} at this magnitude). Neither order determines which "
+            f"per candidate ({bound:.6f} at this magnitude, one bound each "
+            "way). Neither order determines which "
             "of those two is top, so this row cannot carry the argmax half of "
             "the gate. The ulp half is what decides it.")
 
@@ -572,14 +584,17 @@ def cache_equivalence_faults(cached, mono, max_ulp=MAX_ULP, tol_frac=0.01):
     ulp = bf16_ulp(m)
     err = np.abs(c - m)
     # THE ARGMAX CHECK, AND THE QUESTION IT HAS TO ASK FIRST (working rules 11b).
-    # Two reduction orders agree to within one grid step -- the bound enforced
-    # below, which the measurement keeps meeting. If the top TWO candidates
-    # are themselves within that much of each other, a correct cache can put
-    # either on top, and demanding a particular one demands something the
-    # arithmetic does not determine. So the flip is fatal only when the two
-    # swapped candidates are FARTHER apart than the error measured on this
-    # row -- which a cache reading the wrong columns always is, because it
-    # moves values by many ulps (the world-B fixture gives 8+).
+    # Two reduction orders agree to within one grid step PER CANDIDATE -- the
+    # bound enforced below, which the measurement keeps meeting. A swap moves
+    # two candidates, one down and one up, so if the top TWO are within TWICE
+    # that much of each other a correct cache can put either on top, and
+    # demanding a particular one demands something the arithmetic does not
+    # determine. So the flip is fatal only when the two swapped candidates are
+    # FARTHER apart than twice the bound -- which a cache reading the wrong
+    # columns always is, because it moves values by many ulps (the world-B
+    # fixture gives 8+). Given the per-candidate check below, a flip across
+    # more than twice the bound is arithmetically impossible, so this branch
+    # is a consistency check rather than a second criterion (14.0b-31).
     #
     # ⚠ NOT a tolerance fitted to a deviation (working rules 11). The bound is the
     # same 1-ulp agreement justified independently above; what is new is
@@ -601,12 +616,12 @@ def cache_equivalence_faults(cached, mono, max_ulp=MAX_ULP, tol_frac=0.01):
             # things. Sharing one sentence for both produced a message that
             # said a gap of 0.100 was "LARGER than 0.125".
             why = (f"the monolithic gap between them is {gap:.6f}, larger "
-                   f"than the {max_ulp:g}-ulp agreement two reduction orders "
-                   f"can be asked for ({bound:.6f} at this magnitude), and a "
-                   "correct cache cannot reorder two candidates that far "
-                   "apart" if wide else
+                   f"than twice the {max_ulp:g}-ulp agreement two reduction "
+                   f"orders can be asked for per candidate ({bound:.6f} at "
+                   "this magnitude), and a correct cache cannot reorder two "
+                   "candidates that far apart" if wide else
                    f"the gap between them ({gap:.6f}) is inside the "
-                   f"{max_ulp:g}-ulp window, but the per-candidate agreement "
+                   f"2 x {max_ulp:g}-ulp window, but the per-candidate agreement "
                    "does NOT hold (see the ulp fault below), so this flip is "
                    "a consequence of that disagreement and not two reduction "
                    "orders failing to order a tie")
